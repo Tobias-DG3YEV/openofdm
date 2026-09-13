@@ -12,9 +12,12 @@
 // Fork of the openofdm project
 // https://github.com/jhshi/openofdm
 // 
-// Dependencies: 
+// Dependencies: complex_multiplier.v
 // 
 // Revision 1.00 - File Created
+// Revision 1.01 - Xilinx cmpy 6.0 IP replaced by the open complex_multiplier.v
+//                 (same 16x16 -> 32 truncating configuration, latency 3,
+//                 bit- and cycle-identical, verified by tb/tb_complex_multiplier.v)
 // Project: https://github.com/Tobias-DG3YEV/RA-Sentinel
 // 
 //////////////////////////////////////////////////////////////////////////////////
@@ -49,17 +52,33 @@ module complex_mult
     output o_output_strobe
 );
 
-wire [63:0] m_axis_dout_tdata;
-assign o_p_q = m_axis_dout_tdata[63:32];
-assign o_p_i = m_axis_dout_tdata[31:0];
-complex_multiplier mult_inst (
-  .aclk(i_clock),                                 // input wire aclk
-  .s_axis_a_tvalid(i_input_strobe),        	// input wire s_axis_a_tvalid
-  .s_axis_a_tdata({i_a_q, i_a_i}),         	// input wire [31 : 0] s_axis_a_tdata
-  .s_axis_b_tvalid(i_input_strobe),        	// input wire s_axis_b_tvalid
-  .s_axis_b_tdata({i_b_q, i_b_i}),          	// input wire [31 : 0] s_axis_b_tdata
-  .m_axis_dout_tvalid(o_output_strobe),  	// output wire m_axis_dout_tvalid
-  .m_axis_dout_tdata(m_axis_dout_tdata)    	// output wire [63 : 0] m_axis_dout_tdata
+// Open complex multiplier (verilog/complex_multiplier.v) in the exact
+// configuration of the former Xilinx cmpy 6.0 IP: 16x16 -> 32 bit (the LSB of
+// the 33-bit product is removed, floor), latency 3, four DSP48E1, output
+// valid = a valid AND b valid. Real = i_a_i / i_b_i, imaginary = i_a_q / i_b_q
+// (the IP saw tdata = {q, i}). i_enable / i_reset were never applied to the
+// IP either, so clock enable and reset are tied off here as well.
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (i_input_strobe),
+    .i_aReal  (i_a_i),
+    .i_aImag  (i_a_q),
+    .i_bValid (i_input_strobe),
+    .i_bReal  (i_b_i),
+    .i_bImag  (i_b_q),
+    .o_pValid (o_output_strobe),
+    .o_pReal  (o_p_i),
+    .o_pImag  (o_p_q)
 );
 
 

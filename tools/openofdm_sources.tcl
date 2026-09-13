@@ -1,0 +1,192 @@
+# ---------------------------------------------------------------------------
+# openofdm_sources.tcl - the authoritative description of what makes up the
+# openofdm receiver: RTL, IP, include paths, required `defines, and the
+# openViterbi dependency.
+#
+# Consumers source this file and ask it for lists, rather than keeping their
+# own copy of the file names. That is what keeps a downstream project (e.g.
+# RA-Sentinel's OWIFI_RX) from drifting when a file is added here:
+#
+#     source $ofdm/tools/openofdm_sources.tcl
+#     foreach f [openofdm::rtl]        { read_verilog $f }
+#     foreach f [openofdm::viterbi]    { read_verilog $f }
+#     foreach f [openofdm::ip]         { read_ip      $f }
+#     synth_design ... -include_dirs [openofdm::includes] \
+#                      -verilog_define [openofdm::defines]
+#
+# Nothing in here is specific to a board or a Vivado version.
+# ---------------------------------------------------------------------------
+
+namespace eval openofdm {
+
+    # Repository root, derived from this script's own location - so the tree
+    # can be cloned anywhere.
+    variable root [file normalize [file join [file dirname [info script]] ..]]
+
+    # Files in verilog/ that are NOT part of a plain dot11 receiver build:
+    #
+    #   dot11_tb.v                  the testbench; belongs to sim_1, not sources
+    #   common_defs.v               `include-d, never compiled standalone
+    #   common_params.v             ditto (it is a body of parameters, not a module)
+    #   openofdm_rx_pre_def.v       ditto (compile-time configuration)
+    #   openofdm_rx.v               \  openwifi's AXI-attached wrapper family.
+    #   openofdm_rx_s_axi.v          > Only needed when the receiver is dropped
+    #   openofdm_rx_git_rev.v       /   into openwifi's SoC; ask for it with
+    #                                   [openofdm::rtl -axi].
+    variable always_excluded {
+        dot11_tb.v common_defs.v common_params.v openofdm_rx_pre_def.v
+    }
+    variable axi_wrapper {
+        openofdm_rx.v openofdm_rx_s_axi.v openofdm_rx_git_rev.v
+    }
+
+    # --- RTL ---------------------------------------------------------------
+    # openofdm::rtl ?-axi? ?extra_exclusions?
+    #   -axi              also return the AXI wrapper family
+    #   extra_exclusions  list of basenames the caller wants dropped, for when
+    #                     a downstream design provides its own version of a
+    #                     module (a module-name collision is a link error that
+    #                     reads as a missing module, so it is worth being
+    #                     explicit about).
+    proc rtl {args} {
+        variable root
+        variable always_excluded
+        variable axi_wrapper
+
+        set axi 0
+        set extra {}
+        foreach a $args {
+            if {$a eq "-axi"} { set axi 1 } else { set extra [concat $extra $a] }
+        }
+
+        set skip [concat $always_excluded $extra]
+        if {!$axi} { set skip [concat $skip $axi_wrapper] }
+
+        set out {}
+        foreach f [lsort [glob -nocomplain $root/verilog/*.v]] {
+            if {[lsearch -exact $skip [file tail $f]] < 0} { lappend out $f }
+        }
+        if {[llength $out] == 0} {
+            error "openofdm: no RTL found under $root/verilog - wrong \$OPENOFDM?"
+        }
+        # complex_mult.v / stage_mult.v instantiate complex_multiplier from
+        # openCMUL (see below); it is part of the receiver, so it is returned
+        # here and no consumer has to know about the extra repository.
+        return [concat $out [cmul]]
+    }
+
+    # --- openCMUL ----------------------------------------------------------
+    # The open complex multiplier that replaced the Xilinx cmpy 6.0 IP. Like
+    # openViterbi it lives in its own repository (useful on its own) and is
+    # found via $OPENCMUL or as a clone next to this one.
+    proc cmul_root {} {
+        variable root
+        if {[info exists ::env(OPENCMUL)]} {
+            set c $::env(OPENCMUL)
+        } else {
+            set c [file join [file dirname $root] openCMUL]
+        }
+        if {![file isdirectory $c]} {
+            error "openCMUL not found at '$c'.\
+                   Clone https://github.com/Tobias-DG3YEV/openCMUL next to\
+                   this repository, or point \$OPENCMUL at your checkout."
+        }
+        return $c
+    }
+
+    proc cmul {} {
+        set f [file join [cmul_root] rtl complex_multiplier.v]
+        if {![file exists $f]} { error "openCMUL checkout at '[cmul_root]' has no rtl/complex_multiplier.v" }
+        return [list $f]
+    }
+
+    # --- testbench ---------------------------------------------------------
+    proc testbench {} {
+        variable root
+        return $root/verilog/dot11_tb.v
+    }
+
+    # --- Xilinx IP ---------------------------------------------------------
+    # Only the .xci is versioned; every build regenerates the products, which
+    # is also what retargets them from whatever part they were last saved for.
+    #
+    # Not in this list any more: ip_repo/complex_multiplier/complex_multiplier.xci
+    # (replaced by openCMUL, see proc cmul)
+    # (Complex Multiplier 6.0). The receiver uses the open, vendor-neutral
+    # verilog/complex_multiplier.v instead (complex_mult.v, stage_mult.v). The
+    # .xci is kept on disk on purpose: tb/tb_complex_multiplier.v checks the
+    # new module bit for bit against the funcsim netlist generated from it.
+    proc ip {} {
+        variable root
+        return [list \
+            $root/ip_repo/xfft_v9/xfft_v9.xci \
+            $root/ip_repo/div_gen/div_gen_div_gen_0_0.xci \
+            $root/ip_repo/div_gen_xlslice/div_gen_xlslice_0_0.xci \
+        ]
+    }
+
+    # --- include path ------------------------------------------------------
+    proc includes {} {
+        variable root
+        return [list $root/verilog]
+    }
+
+    # --- required `defines -------------------------------------------------
+    # LUT_DIR tells lut_roms.v where the three ROM .mif files are. Both
+    # synthesis and XSim resolve a relative $readmem path against the tool's
+    # working directory, not against the source file, so this cannot be left
+    # to a relative default.
+    proc defines {} {
+        variable root
+        return [list LUT_DIR=\"$root/verilog\"]
+    }
+
+    # --- test vectors ------------------------------------------------------
+    proc vectors {} {
+        variable root
+        return $root/verilog/testing_inputs
+    }
+
+    # Defines a simulation needs on top of [defines]: which vector directory
+    # openofdm_rx_pre_def.v should build `SAMPLE_FILE from.
+    proc sim_defines {} {
+        variable root
+        return [concat [defines] [list VECTOR_DIR=\"[vectors]\"]]
+    }
+
+    # --- openViterbi -------------------------------------------------------
+    # The open-source Viterbi decoder that replaced the license-locked Xilinx
+    # viterbi_v7_0 evaluation IP. It is a separate repository because it is
+    # useful on its own; ofdm_decoder.v instantiates Viterbi_decoder by module
+    # name, so it only has to be on the source path.
+    #
+    # Resolution order: $OPENVITERBI, then a clone sitting next to this one.
+    proc viterbi_root {} {
+        variable root
+        if {[info exists ::env(OPENVITERBI)]} {
+            set v $::env(OPENVITERBI)
+        } else {
+            set v [file join [file dirname $root] openViterbi]
+        }
+        if {![file isdirectory $v]} {
+            error "openViterbi not found at '$v'.\
+                   Clone https://github.com/Tobias-DG3YEV/openViterbi next to\
+                   this repository, or point \$OPENVITERBI at your checkout."
+        }
+        return $v
+    }
+
+    proc viterbi {} {
+        set out [lsort [glob -nocomplain [viterbi_root]/*.v]]
+        if {[llength $out] == 0} {
+            error "openViterbi checkout at '[viterbi_root]' contains no .v files"
+        }
+        return $out
+    }
+
+    # --- one-line provenance for build logs --------------------------------
+    proc banner {} {
+        variable root
+        return "openofdm $root + openViterbi [viterbi_root] + openCMUL [cmul_root]"
+    }
+}

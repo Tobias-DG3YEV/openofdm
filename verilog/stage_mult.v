@@ -12,9 +12,12 @@
 // Fork of the openofdm project
 // https://github.com/jhshi/openofdm
 // 
-// Dependencies: 
+// Dependencies: complex_multiplier.v, delayT.v
 // 
 // Revision 1.00 - File Created
+// Revision 1.01 - the eight Xilinx cmpy 6.0 IP instances replaced by the open
+//                 complex_multiplier.v (same 16x16 -> 32 truncating configuration,
+//                 latency 3, bit- and cycle-identical; output_strobe unchanged)
 // Project: https://github.com/Tobias-DG3YEV/RA-Sentinel
 // 
 //////////////////////////////////////////////////////////////////////////////////
@@ -113,84 +116,198 @@ wire signed [31:0] prod_6_q;
 wire signed [31:0] prod_7_i;
 wire signed [31:0] prod_7_q;
 
-complex_multiplier mult_inst1 (
-  .aclk(i_clock),
-  .s_axis_a_tvalid(input_strobe),
-  .s_axis_a_tdata({X0_i,X0_q}),
-  .s_axis_b_tvalid(input_strobe),
-  .s_axis_b_tdata({Y0_i,Y0_q}),
-  .m_axis_dout_tvalid(),
-  .m_axis_dout_tdata({prod_0_q,prod_0_i})
+// Open complex multiplier (verilog/complex_multiplier.v) in the exact
+// configuration of the former Xilinx cmpy 6.0 IP (16x16 -> 32 bit, LSB of the
+// 33-bit product removed, latency 3, four DSP48E1 each). The IP was fed
+// tdata = {Xn_i, Xn_q}, i.e. tdata[15:0] = Xn_q was its REAL input and
+// tdata[31:16] = Xn_i its IMAGINARY input, and it returned
+// {prod_n_q, prod_n_i} = {imaginary, real}. That mapping is kept exactly:
+// real <- Xn_q / Yn_q, imaginary <- Xn_i / Yn_i, prod_n_i <- real product,
+// prod_n_q <- imaginary product. Clock enable and reset are tied off like the
+// IP had none; output_strobe still comes from the delayT below.
+
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier_0 (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (input_strobe),
+    .i_aReal  (X0_q),
+    .i_aImag  (X0_i),
+    .i_bValid (input_strobe),
+    .i_bReal  (Y0_q),
+    .i_bImag  (Y0_i),
+    .o_pValid (),
+    .o_pReal  (prod_0_i),
+    .o_pImag  (prod_0_q)
 );
 
-complex_multiplier mult_inst2 (
-  .aclk(i_clock),
-  .s_axis_a_tvalid(input_strobe),
-  .s_axis_a_tdata({X1_i,X1_q}),
-  .s_axis_b_tvalid(input_strobe),
-  .s_axis_b_tdata({Y1_i,Y1_q}),
-  .m_axis_dout_tvalid(),
-  .m_axis_dout_tdata({prod_1_q,prod_1_i})
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier_1 (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (input_strobe),
+    .i_aReal  (X1_q),
+    .i_aImag  (X1_i),
+    .i_bValid (input_strobe),
+    .i_bReal  (Y1_q),
+    .i_bImag  (Y1_i),
+    .o_pValid (),
+    .o_pReal  (prod_1_i),
+    .o_pImag  (prod_1_q)
 );
 
-complex_multiplier mult_inst3 (
-  .aclk(i_clock),
-  .s_axis_a_tvalid(input_strobe),
-  .s_axis_a_tdata({X2_i,X2_q}),
-  .s_axis_b_tvalid(input_strobe),
-  .s_axis_b_tdata({Y2_i,Y2_q}),
-  .m_axis_dout_tvalid(),
-  .m_axis_dout_tdata({prod_2_q,prod_2_i})
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier_2 (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (input_strobe),
+    .i_aReal  (X2_q),
+    .i_aImag  (X2_i),
+    .i_bValid (input_strobe),
+    .i_bReal  (Y2_q),
+    .i_bImag  (Y2_i),
+    .o_pValid (),
+    .o_pReal  (prod_2_i),
+    .o_pImag  (prod_2_q)
 );
 
-complex_multiplier mult_inst4 (
-  .aclk(i_clock),
-  .s_axis_a_tvalid(input_strobe),
-  .s_axis_a_tdata({X3_i,X3_q}),
-  .s_axis_b_tvalid(input_strobe),
-  .s_axis_b_tdata({Y3_i,Y3_q}),
-  .m_axis_dout_tvalid(),
-  .m_axis_dout_tdata({prod_3_q,prod_3_i})
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier_3 (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (input_strobe),
+    .i_aReal  (X3_q),
+    .i_aImag  (X3_i),
+    .i_bValid (input_strobe),
+    .i_bReal  (Y3_q),
+    .i_bImag  (Y3_i),
+    .o_pValid (),
+    .o_pReal  (prod_3_i),
+    .o_pImag  (prod_3_q)
 );
 
-complex_multiplier mult_inst5 (
-  .aclk(i_clock),
-  .s_axis_a_tvalid(input_strobe),
-  .s_axis_a_tdata({X4_i,X4_q}),
-  .s_axis_b_tvalid(input_strobe),
-  .s_axis_b_tdata({Y4_i,Y4_q}),
-  .m_axis_dout_tvalid(),
-  .m_axis_dout_tdata({prod_4_q,prod_4_i})
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier_4 (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (input_strobe),
+    .i_aReal  (X4_q),
+    .i_aImag  (X4_i),
+    .i_bValid (input_strobe),
+    .i_bReal  (Y4_q),
+    .i_bImag  (Y4_i),
+    .o_pValid (),
+    .o_pReal  (prod_4_i),
+    .o_pImag  (prod_4_q)
 );
 
-complex_multiplier mult_inst6 (
-  .aclk(i_clock),
-  .s_axis_a_tvalid(input_strobe),
-  .s_axis_a_tdata({X5_i,X5_q}),
-  .s_axis_b_tvalid(input_strobe),
-  .s_axis_b_tdata({Y5_i,Y5_q}),
-  .m_axis_dout_tvalid(),
-  .m_axis_dout_tdata({prod_5_q,prod_5_i})
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier_5 (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (input_strobe),
+    .i_aReal  (X5_q),
+    .i_aImag  (X5_i),
+    .i_bValid (input_strobe),
+    .i_bReal  (Y5_q),
+    .i_bImag  (Y5_i),
+    .o_pValid (),
+    .o_pReal  (prod_5_i),
+    .o_pImag  (prod_5_q)
 );
 
-complex_multiplier mult_inst7 (
-  .aclk(i_clock),
-  .s_axis_a_tvalid(input_strobe),
-  .s_axis_a_tdata({X6_i,X6_q}),
-  .s_axis_b_tvalid(input_strobe),
-  .s_axis_b_tdata({Y6_i,Y6_q}),
-  .m_axis_dout_tvalid(),
-  .m_axis_dout_tdata({prod_6_q,prod_6_i})
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier_6 (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (input_strobe),
+    .i_aReal  (X6_q),
+    .i_aImag  (X6_i),
+    .i_bValid (input_strobe),
+    .i_bReal  (Y6_q),
+    .i_bImag  (Y6_i),
+    .o_pValid (),
+    .o_pReal  (prod_6_i),
+    .o_pImag  (prod_6_q)
 );
 
-complex_multiplier mult_inst8 (
-  .aclk(i_clock),
-  .s_axis_a_tvalid(input_strobe),
-  .s_axis_a_tdata({X7_i,X7_q}),
-  .s_axis_b_tvalid(input_strobe),
-  .s_axis_b_tdata({Y7_i,Y7_q}),
-  .m_axis_dout_tvalid(),
-  .m_axis_dout_tdata({prod_7_q,prod_7_i})
+complex_multiplier #(
+    .A_WIDTH       (16),
+    .B_WIDTH       (16),
+    .OUT_WIDTH     (32),
+    .LATENCY       (3),
+    .ROUND_MODE    (0),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) u_complex_multiplier_7 (
+    .i_clk    (i_clock),
+    .i_clkEn  (1'b1),
+    .i_rstN   (1'b1),
+    .i_aValid (input_strobe),
+    .i_aReal  (X7_q),
+    .i_aImag  (X7_i),
+    .i_bValid (input_strobe),
+    .i_bReal  (Y7_q),
+    .i_bImag  (Y7_i),
+    .o_pValid (),
+    .o_pReal  (prod_7_i),
+    .o_pImag  (prod_7_q)
 );
 
 reg signed [31:0] sum_i1;
