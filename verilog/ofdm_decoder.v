@@ -127,31 +127,66 @@ deinterleave deinterleave_inst (
     .o_output_strobe(deinterleave_out_strobe),
     .o_erase(erase)
 );
-/*
-viterbi_v7_0 viterbi_inst (
-    .clk(i_clock),
-    .ce(vit_ce),
-    .sclr(vit_clr),
-    .data_in0(conv_in0),
-    .data_in1(conv_in1),
-    .erase(conv_erase),
-    .rdy(vit_rdy),
-    .data_out(o_conv_decoder_out)
+wire [6:0] idle_wire_7bit ;
+
+// Open source Viterbi decoder, from the openViterbi repository. It replaces the
+// license-locked Xilinx viterbi_v7_0 evaluation IP the upstream openofdm used;
+// that IP is no longer part of this repository, so openViterbi must be on the
+// source path (the build scripts resolve it through $OPENVITERBI).
+//
+// Same soft symbol convention as the deinterleaver output: 3-bit signed magnitude,
+// 0..3 -> bit 0 (011 = strongest 0), 4..7 -> bit 1 (111 = strongest 1).
+Viterbi_decoder viterbi_inst (
+  .aclk(i_clock),                          // input wire aclk
+  .aresetn(~vit_clr),                      // input wire aresetn
+  .aclken(vit_ce),                         // input wire aclken
+  .s_axis_tdata({2'b0,conv_in1_dly,conv_in0_dly}),    // input wire [7 : 0] s_axis_tdata = {2'b0, in2_conv, in1_conv}
+  .s_axis_tuser(conv_erase_dly),           // input wire [1 : 0] s_axis_tuser (erase bits for puncturing)
+  .s_axis_tvalid(conv_in_stb_dly),         // input wire s_axis_tvalid
+  .m_axis_tdata({idle_wire_7bit, o_conv_decoder_out}),    // output wire [7 : 0] m_axis_tdata
+  .m_axis_tvalid(m_axis_data_tvalid)       // output wire m_axis_tvalid
 );
-*/
-//reg [4:0] idle_wire_5bit ;
-//wire [6:0] idle_wire_7bit ; 
-viterbi_v7_0 viterbi_inst (
-  .aclk(i_clock),                              // input wire aclk
-  .aresetn(~vit_clr),                        // input wire aresetn
-  .aclken(vit_ce),                          // input wire aclken
-  .s_axis_data_tdata({5'b0,conv_in1_dly,5'b0,conv_in0_dly}),    // input wire [15 : 0] s_axis_data_tdata
-  .s_axis_data_tuser({6'b0,conv_erase_dly}),    // input wire [7 : 0] s_axis_data_tuser
-  .s_axis_data_tvalid(conv_in_stb_dly),  // input wire s_axis_data_tvalid
-  .s_axis_data_tready(vit_rdy),  // output wire s_axis_data_tready
-  .m_axis_data_tdata({idle_wire_7bit, o_conv_decoder_out}),    // output wire [7 : 0] m_axis_data_tdata
-  .m_axis_data_tvalid(m_axis_data_tvalid)  // output wire m_axis_data_tvalid
-);
+
+// Viterbi_decoder has no tready: its input FIFO (depth 3x traceback length) is always ready
+assign vit_rdy = 1'b1;
+
+// --- decoder I/O trace, simulation only ------------------------------------
+// Dumps the soft symbols going into the Viterbi and the bits coming out, so a
+// decode failure can be attributed to the decoder or to what feeds it. Opt in
+// with -d VITERBI_TRACE; the files land in the simulation working directory.
+// Synthesis ignores file I/O, but leaving it unconditional means every
+// synthesis run reports it - so it is guarded rather than merely inert.
+`ifdef VITERBI_TRACE
+integer viterbi_in_fd = 0;
+integer viterbi_out_fd = 0;
+integer viterbi_rep_fd = 0;
+integer bitctr_in = 0;
+integer bitctr_out = 0;
+
+always @(posedge i_clock) begin
+    if(vit_clr) begin
+        if(viterbi_in_fd == 0)
+            viterbi_in_fd = $fopen("./viterbi_in.csv", "w");
+        if(viterbi_out_fd == 0)
+            viterbi_out_fd = $fopen("./viterbi_out.csv", "w");
+        if(viterbi_rep_fd == 0)
+            viterbi_rep_fd = $fopen("./viterbi_report.txt", "w");
+     end
+end
+
+integer out_ongoing = 1;
+
+always @(negedge i_clock) begin
+    if(viterbi_out_fd && m_axis_data_tvalid) begin
+        $fwrite(viterbi_out_fd, o_conv_decoder_out, "\n");
+        out_ongoing = 1;
+    end
+    if(~m_axis_data_tvalid && out_ongoing == 1) begin
+        out_ongoing = 0;
+    end
+
+end
+`endif // VITERBI_TRACE
 
 descramble decramble_inst (
     .i_clock(i_clock),
@@ -192,9 +227,17 @@ always @(posedge i_clock) begin
 
         //flush <= 0;
         deinter_out_count <= 0;
+`ifdef VITERBI_TRACE
+        $fwrite(viterbi_in_fd, "++++++++++++++++++++++++++++++\n");
+        $fflush(viterbi_in_fd);
+`endif
     end else if (i_enable) begin
         if (deinterleave_out_strobe) begin
             deinter_out_count <= deinter_out_count + 1;
+`ifdef VITERBI_TRACE
+            $fwrite(viterbi_in_fd, {5'b0,conv_in1,5'b0,conv_in0}, "\n");
+            $fflush(viterbi_in_fd);
+`endif
         end //else begin
             // wait for finishing deinterleaving current symbol
             // only do flush for non-DATA bits, such as SIG and HT-SIG, which

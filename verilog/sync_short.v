@@ -55,7 +55,12 @@ module sync_short (
     output [31:0] o_phase_in_q,
     output o_phase_in_stb,
 
-    output reg signed [15:0] o_phase_offset
+    output reg signed [15:0] o_phase_offset,
+
+    /* read-only debug tap: 64-sample moving average of |sample|^2, the
+       receiver's relative baseband power (no absolute RSSI exists - the
+       MAX2831 RSSI pin is not digitized on this board). */
+    output wire [31:0] o_mag_sq_avg
 );
 `include "common_params.v"
 
@@ -72,6 +77,7 @@ wire mag_sq_stb;
 
 wire [31:0] mag_sq_avg;
 wire mag_sq_avg_stb;
+assign o_mag_sq_avg = mag_sq_avg;
 reg [31:0] prod_thres;
 
 wire [31:0] sample_delayed;

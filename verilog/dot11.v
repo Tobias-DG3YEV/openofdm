@@ -111,6 +111,7 @@ module dot11 (
     // sync short
     `DEBUG_PREFIX output o_short_preamble_detected,
     `DEBUG_PREFIX  output [15:0] o_phase_offset,
+    output wire [31:0] o_mag_sq_avg,
 
     // sync long
     output [31:0] o_sync_long_metric,
@@ -427,7 +428,8 @@ sync_short sync_short_inst (
 
     .i_demod_is_ongoing(o_demod_is_ongoing),
     .o_short_preamble_detected(o_short_preamble_detected),
-    .o_phase_offset(o_phase_offset)
+    .o_phase_offset(o_phase_offset),
+    .o_mag_sq_avg(o_mag_sq_avg)
 );
 
 sync_long sync_long_inst (

@@ -111,7 +111,17 @@ module signal_watchdog
 
     assign equalizer_monitor_rst = ( (small_abs_eq_i_counter >= i_small_eq_out_counter_th) && (small_abs_eq_q_counter >= i_small_eq_out_counter_th) );
 
-    assign o_receiver_rst = ( i_power_trigger & ( equalizer_monitor_rst | receiver_rst_reg | (i_sig_valid && (i_signal_len<i_min_signal_len_th || i_signal_len>i_max_signal_len_th)) ) );
+    // Registered so the reset tree fans out from a flop: the combinational cone
+    // (i_signal_len threshold compare etc.) otherwise fails recovery timing on the
+    // thousands of async reset pins driven via receiver_rst -> dot11_reset.
+    `DEBUG_PREFIX reg receiver_rst_out;
+    assign o_receiver_rst = receiver_rst_out;
+    always @(posedge i_clk) begin
+      if (~i_rstn)
+        receiver_rst_out <= 0;
+      else
+        receiver_rst_out <= ( i_power_trigger & ( equalizer_monitor_rst | receiver_rst_reg | (i_sig_valid && (i_signal_len<i_min_signal_len_th || i_signal_len>i_max_signal_len_th)) ) );
+    end
 
     // abnormal signal monitor
     always @(posedge i_clk) begin
