@@ -57,6 +57,21 @@ that configuration (verified against the IP's own simulation netlist over
 The IP's ``.xci`` is kept under ``ip_repo/`` purely as the reference model of
 that bench; it is not read by any build.
 
+Measured against the IP (xc7a100t-2, 16x16 -> 32 bit, OOC synthesis, Fmax
+estimated from the post-synthesis slack):
+
+========================  ==========================  =======  ===  ===  ===  =========
+core                      mode                        latency  DSP  LUT  FF   Fmax est.
+========================  ==========================  =======  ===  ===  ===  =========
+Xilinx cmpy 6.0           Performance (4 mult.)       3        4    2    2    ~300 MHz
+openCMUL                  OPTIMIZE_GOAL=1 (4 mult.)   3        4    2    3    ~400 MHz
+Xilinx cmpy 6.0           Resources (3 mult.)         6        3    2    114  ~610 MHz
+openCMUL                  OPTIMIZE_GOAL=0 (Gauss)     4        3    50   68   ~310 MHz
+========================  ==========================  =======  ===  ===  ===  =========
+
+The receiver uses the four-multiplier mode: same DSP count, same latency,
+bit- and cycle-exact outputs.
+
 What remains is three ordinary, licence-free cores: ``xfft_v9``, ``div_gen``
 (the equalizer's three real divisions) and ``div_gen_xlslice``. Only their
 ``.xci`` are versioned, under ``ip_repo/``; every build regenerates the
