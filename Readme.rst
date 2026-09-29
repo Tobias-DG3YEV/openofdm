@@ -29,7 +29,7 @@ http://openofdm.readthedocs.io.
 What was replaced
 -----------------
 
-Two families of Xilinx IP are gone from this fork:
+Four Xilinx cores are gone from this fork:
 
 **The Viterbi decoder.** ``viterbi_v7_0`` is a licence-locked evaluation core:
 it stops working after a time limit and cannot be shipped. ``ofdm_decoder.v``
@@ -72,32 +72,68 @@ openCMUL                  OPTIMIZE_GOAL=0 (Gauss)     4        3    50   68   ~3
 The receiver uses the four-multiplier mode: same DSP count, same latency,
 bit- and cycle-exact outputs.
 
-What remains is three ordinary, licence-free cores: ``xfft_v9``, ``div_gen``
-(the equalizer's three real divisions) and ``div_gen_xlslice``. Only their
-``.xci`` are versioned, under ``ip_repo/``; every build regenerates the
-products, which is also what retargets them to the part in use.
+**The divider.** ``divider.v`` (LVPE and arctangent divisions) and the
+equalizer used the Xilinx Divider Generator 5.1 (``div_gen``, Radix2, 32 / 24
+bit signed, latency 36) followed by ``div_gen_xlslice``, which kept the
+integer quotient. ``divider.v`` now instantiates ``signed_divider`` from
+**openCDIV**, bit- and cycle-exact to that pair (including its result on a
+division by zero, which ``phase.v`` relies on). The equalizer's division of
+a subcarrier x by the channel estimate h::
+
+    x / h = x * conj(h) / (h * conj(h))
+
+took two complex multipliers and two dividers, spelled out in
+``equalizer.v``. It is now one ``complex_divider`` from the same repository,
+same arithmetic bit for bit:
+
+    https://github.com/Tobias-DG3YEV/openCDIV
+
+The IP's ``.xci`` (and the slice's) are kept under ``ip_repo/`` purely as
+the reference model of openCDIV's benches; no build reads them.
+
+Measured against the IP (xc7a100t-2, 32 / 24 bit signed, latency 36, OOC
+synthesis + opt_design, Fmax estimated from the slack against 3 ns):
+
+========================  ===========================  =======  ====  ====  =========
+core                      datapath                     latency  LUT   FF    Fmax est.
+========================  ===========================  =======  ====  ====  =========
+Xilinx div_gen 5.1        one real division            36       952   2166  ~229 MHz
+openCDIV signed_divider   one real division            36       968   1827  ~312 MHz
+2x cmpy + 2x div_gen      x * conj(h) / (h * conj(h))  39       1963  4333  ~229 MHz
+openCDIV complex_divider  x * conj(h) / (h * conj(h))  39       1976  3598  ~308 MHz
+========================  ===========================  =======  ====  ====  =========
+
+(The last two rows include the six DSP48E1 of the two complex multipliers;
+the multipliers are openCMUL in both, so the difference is the dividers.)
+
+What remains is one ordinary, licence-free core: ``xfft_v9``. Only its
+``.xci`` is versioned, under ``ip_repo/``; every build regenerates the
+products, which is also what retargets it to the part in use.
 
 
 Environment setup
 -----------------
 
 Requires AMD Vivado (developed against 2025.2; 2024.1 also elaborates) and a
-checkout of openViterbi. Clone the two side by side::
+checkout of openViterbi, openCMUL and openCDIV. Clone them side by side::
 
     cd ~
     git clone https://github.com/Tobias-DG3YEV/openViterbi.git
     git clone https://github.com/Tobias-DG3YEV/openCMUL.git
+    git clone https://github.com/Tobias-DG3YEV/openCDIV.git
     git clone https://github.com/Tobias-DG3YEV/openofdm.git
 
-That layout needs no configuration - openofdm looks for ``openViterbi`` and
-``openCMUL`` next to itself. Elsewhere, set ``$OPENVITERBI`` / ``$OPENCMUL``
-to your checkouts. Then::
+That layout needs no configuration - openofdm looks for ``openViterbi``,
+``openCMUL`` and ``openCDIV`` next to itself. Elsewhere, set
+``$OPENVITERBI`` / ``$OPENCMUL`` / ``$OPENCDIV`` to your checkouts. Then::
 
     source /tools/2025.2/Vivado/settings64.sh
     cd ~/openofdm
     make check      # out-of-context synthesis of dot11 - the setup smoke test
     make sim        # simulate dot11_tb against the default reference vector
-    make tb         # openCMUL's multiplier bench vs the cmpy netlist (XSim)
+    make tb         # openCMUL's and openCDIV's benches vs the netlists of the
+                    # cmpy / div_gen cores they replace (XSim); writes the
+                    # netlists first if missing (make refnetlists)
     make regression # dot11 against every reference vector, FCS verdict per rate
     make project    # generate a Vivado GUI project under build/
 
@@ -122,7 +158,8 @@ authoritative description of what makes up the receiver; source it and ask::
 
 ``[openofdm::rtl]`` already drops the testbench, the ``\`include``-only files
 and the AXI wrapper family (ask for the latter with ``[openofdm::rtl -axi]``),
-and it appends openCMUL's ``complex_multiplier.v``.
+and it appends openCMUL's ``complex_multiplier.v`` and openCDIV's
+``signed_divider.v`` and ``complex_divider.v``.
 
 ``[openofdm::defines]`` is **not optional**. It carries ``LUT_DIR``, which
 tells ``lut_roms.v`` where its three ``.mif`` files are. Both synthesis and
@@ -155,10 +192,12 @@ Repository layout
       *.v.bak           the upstream originals, before the port renaming
       dot11_tb.v        the receiver testbench
       testing_inputs/   reference IQ captures (conducted/radiated/simulated)
-    ip_repo/            the three remaining Xilinx cores, .xci only
-                        (+ the cmpy .xci, reference model of openCMUL's bench)
+    ip_repo/            the remaining Xilinx core (xfft_v9), .xci only
+                        (+ the cmpy and div_gen .xci, reference models of the
+                        openCMUL / openCDIV benches)
     tools/              openofdm_sources.tcl + the Vivado flows:
       run_regression.tcl  every reference vector through dot11_tb, one session
+      ref_netlists.tcl  funcsim netlists of the retired cmpy / div_gen cores
       synth_module.tcl  OOC synthesis + Fmax estimate of one module
     wip/cordic_arctan/  parked: open arctangent for phase.v (next milestone)
     scripts/            python: LUT generators, reference decoder, conv_iq_hex
@@ -191,6 +230,11 @@ purpose - the alternative is synthesising a receiver with no decoder in it.
 
 A: Same as for openViterbi: clone https://github.com/Tobias-DG3YEV/openCMUL
 next to this repository, or point ``$OPENCMUL`` at your checkout.
+
+**Q: The build fails with "openCDIV not found".**
+
+A: Same again: clone https://github.com/Tobias-DG3YEV/openCDIV next to this
+repository, or point ``$OPENCDIV`` at your checkout.
 
 **Q: Everything synthesises but nothing decodes.**
 

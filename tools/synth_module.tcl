@@ -11,9 +11,11 @@
 #   -generic     override a top-level parameter (repeatable; synth_design -generic)
 #   -tag         output directory suffix: build/synth/<top>_<tag>/
 #                (default build/synth/<top>/), for several parameter sets of one top
-#   -ip          force reading the div_gen IP. Auto-detected when the source
-#                that defines <top> instantiates `divider` or `div_gen`; for a
-#                deeper hierarchy (dot11 -> equalizer -> divider) pass -ip.
+#   -ip          force reading the Xilinx IP ([openofdm::ip], i.e. xfft_v9).
+#                Auto-detected when the source that defines <top> instantiates
+#                `xfft_v9`; for a deeper hierarchy (dot11 -> ofdm_decoder ->
+#                ... -> xfft_v9) pass -ip. (The dividers are openCDIV RTL
+#                now and need no IP.)
 #   -files-only  read only the files listed, not verilog/*.v (useful while an
 #                unrelated file in verilog/ does not parse)
 #   file ...     extra sources, e.g. tb/phase_divlut_ref.v
@@ -38,10 +40,9 @@
 # BRAM counts RAMB18 + RAMB36 primitives. Part xc7a100tcsg324-2 like
 # synth_check.tcl; no placement or routing, so Fmax is an estimate.
 #
-# NOTE: reading the div_gen IP regenerates its products next to the .xci
-# (reset_target all + synth_ip, like synth_check.tcl), which also rewrites
-# the funcsim netlist ip_repo/div_gen/div_gen_div_gen_0_0_sim_netlist.v that
-# tb_phase needs. Do not run this concurrently with that bench.
+# NOTE: reading the IP regenerates its products next to the .xci
+# (reset_target all + synth_ip, like synth_check.tcl). Do not run this
+# concurrently with a simulation that reads those products.
 #
 # Project: RA-Sentinel (NLnet) - fork of openofdm,
 #          https://github.com/Tobias-DG3YEV/openofdm
@@ -120,22 +121,20 @@ foreach f $sources {
 if {$topText eq ""} {
     error "no source defines module '$top' (searched [llength $sources] files)"
 }
-# Instantiation of divider / div_gen in the top's file (comments stripped, so
-# a header line like "divider replaced by cordic_arctan" does not count).
+# Instantiation of xfft_v9 in the top's file (comments stripped, so a
+# header line that merely mentions it does not count).
 regsub -all {/\*.*?\*/} $topText "" topCode
 regsub -all -line {//.*$} $topCode "" topCode
-set needsIp [expr {$forceIp || [regexp -line {^\s*(divider|div_gen)\s+(#|[A-Za-z_])} $topCode]}]
+set needsIp [expr {$forceIp || [regexp -line {^\s*xfft_v9\s+(#|[A-Za-z_])} $topCode]}]
 
 set_part $part
 foreach f $sources { read_verilog $f }
 
-# --- Xilinx IP (div_gen), same recipe as synth_check.tcl ----------------------
-if {$needsIp} {
+# --- Xilinx IP (xfft_v9), same recipe as synth_check.tcl ----------------------
+if {$needsIp && [llength [openofdm::ip]]} {
     foreach x [openofdm::ip] {
-        if {[string match "*div_gen*" $x]} {
-            puts "### IP $x"
-            read_ip $x
-        }
+        puts "### IP $x"
+        read_ip $x
     }
     # upgrade_ip retargets the .xci to this part. Not -quiet: a silent failure
     # leaves the IP locked and synthesis dies later on a missing module.
@@ -204,9 +203,9 @@ proc fmaxLine {clkPort period} {
     return "$fmax  (MHz; period ${period} ns, WNS $wns ns)"
 }
 
-# Post-synthesis numbers first. An OOC-synthesized IP (div_gen) still carries
-# logic the wrapper never uses (e.g. the 24 fractional quotient bits that
-# div_gen_xlslice drops); opt_design propagates constants across the IP
+# Post-synthesis numbers first. An OOC-synthesized IP still carries logic
+# the wrapper never uses (the retired div_gen kept 24 fractional quotient
+# bits its slice dropped); opt_design propagates constants across the IP
 # boundary and removes it, which is what the routed board reports show.
 write_checkpoint -force $out/post_synth.dcp
 puts "### UTIL_SYNTH [utilLine $top]"

@@ -167,7 +167,6 @@ reg [15:0] lts_q_in;
 reg lts_in_stb;
 wire signed [15:0] lts_i_out;
 wire signed [15:0] lts_q_out;
-wire signed [15:0] lts_q_out_neg = ~lts_q_out + 1;
 
 reg [5:0] in_waddr;
 reg [6:0] in_raddr;
@@ -214,12 +213,6 @@ reg rot_in_stb;
 wire signed [15:0] rot_i;
 wire signed [15:0] rot_q;
 
-wire [31:0] mag_sq;
-wire [31:0] prod_i;
-wire [31:0] prod_q;
-wire [31:0] prod_i_scaled = prod_i<<(`CONS_SCALE_SHIFT+1);
-wire [31:0] prod_q_scaled = prod_q<<(`CONS_SCALE_SHIFT+1); // +1 to fix the bug threshold for demodulate.v
-//wire prod_stb;
 
 reg signed [15:0] lts_reg1_i, lts_reg2_i, lts_reg3_i, lts_reg4_i, lts_reg5_i;
 reg signed [15:0] lts_reg1_q, lts_reg2_q, lts_reg3_q, lts_reg4_q, lts_reg5_q;
@@ -242,13 +235,16 @@ reg [2:0] lts_mv_avg_len;
 reg lts_div_in_stb;
 
 reg prod_in_strobe;
-wire prod_out_strobe;
 
-wire [31:0] dividend_i = (o_state == S_SMOOTH_CH_DC || o_state == S_SMOOTH_CH_LTS) ? (lts_sum_i[18] == 0 ? {13'h0,lts_sum_i} : {13'h1FFF,lts_sum_i}) : (o_state == S_ALL_SC_PE_CORRECTION ? prod_i_scaled : 0);
-wire [31:0] dividend_q = (o_state == S_SMOOTH_CH_DC || o_state == S_SMOOTH_CH_LTS) ? (lts_sum_q[18] == 0 ? {13'h0,lts_sum_q} : {13'h1FFF,lts_sum_q}) : (o_state == S_ALL_SC_PE_CORRECTION ? prod_q_scaled : 0);
-wire [23:0] divisor_i = (o_state == S_SMOOTH_CH_DC || o_state == S_SMOOTH_CH_LTS) ? {21'b0,lts_mv_avg_len} : (o_state == S_ALL_SC_PE_CORRECTION ? mag_sq[23:0] : 1);
-wire [23:0] divisor_q = (o_state == S_SMOOTH_CH_DC || o_state == S_SMOOTH_CH_LTS) ? {21'b0,lts_mv_avg_len} : (o_state == S_ALL_SC_PE_CORRECTION ? mag_sq[23:0] : 1);
-wire div_in_stb = (o_state == S_SMOOTH_CH_DC || o_state == S_SMOOTH_CH_LTS) ? lts_div_in_stb : (o_state == S_ALL_SC_PE_CORRECTION ? prod_out_strobe : 0);
+// Both uses of the complex divider below:
+//  - channel smoothing: the moving sum of LTS samples divided by the number
+//    of samples (n / d path)
+//  - all subcarriers: rotated sample x divided by the channel estimate h,
+//    x / h = x * conj(h) / (h * conj(h)) (x / h path)
+wire smooth_state = (o_state == S_SMOOTH_CH_DC || o_state == S_SMOOTH_CH_LTS);
+wire [31:0] lts_sum_i_ext = (lts_sum_i[18] == 0 ? {13'h0,lts_sum_i} : {13'h1FFF,lts_sum_i});
+wire [31:0] lts_sum_q_ext = (lts_sum_q[18] == 0 ? {13'h0,lts_sum_q} : {13'h1FFF,lts_sum_q});
+wire lts_nd_stb = smooth_state ? lts_div_in_stb : 0;
 
 reg [15:0] num_output;
 wire [31:0] quotient_i;
@@ -370,58 +366,48 @@ rotate rotate_inst (
     .o_output_strobe(rot_out_stb)
 );
 
-complex_mult input_lts_prod_inst (
-    .i_clock(i_clock),
-    .i_enable(i_enable),
-    .i_reset(i_reset|reset_internal),
-    .i_a_i(rot_i),
-    .i_a_q(rot_q),
-    .i_b_i(lts_i_out),
-    .i_b_q(lts_q_out_neg),
-    .i_input_strobe(rot_out_stb),
-    .o_p_i(prod_i),
-    .o_p_q(prod_q),
-    .o_output_strobe(prod_out_strobe)
-);
+wire norm_xh_stb = (o_state == S_ALL_SC_PE_CORRECTION) ? rot_out_stb : 0;
 
-complex_mult lts_lts_prod_inst (
-    .i_clock(i_clock),
-    .i_enable(i_enable),
-    .i_reset(i_reset|reset_internal),
-    .i_a_i(lts_i_out),
-    .i_a_q(lts_q_out),
-    .i_b_i(lts_i_out),
-    .i_b_q(lts_q_out_neg),
-    .i_input_strobe(rot_out_stb),
-    .o_p_i(mag_sq),
-    .o_p_q(),
-    .o_output_strobe()
-);
+// Complex divider from openCDIV (complex_divider.v): x / h is computed as
+// x * conj(h) / (h * conj(h)) with two openCMUL multipliers (16x16, top 32
+// of 33 bits, latency 3) and two signed dividers (32 / 24 bit, latency 36).
+// The numerator x * conj(h) is scaled by 2^(CONS_SCALE_SHIFT+1) before the
+// division (+1 to fix the bug threshold for demodulate.v), the denominator
+// h * conj(h) is cut to 24 bits - the arithmetic of the former
+// complex_mult + div_gen datapath, bit for bit.
+// x / h: sample x = rot, channel h = LTS, output 3 + 36 clocks later.
+// n / d: smoothed LTS = lts_sum / lts_mv_avg_len, output 36 clocks later.
+// The multipliers and dividers ignore i_enable / i_reset, as the IP did.
+complex_divider #(
+    .X_WIDTH       (16),
+    .H_WIDTH       (16),
+    .PROD_WIDTH    (32),
+    .NUM_SHIFT     (`CONS_SCALE_SHIFT+1),
+    .NUM_WIDTH     (32),
+    .DEN_WIDTH     (24),
+    .MUL_LATENCY   (3),
+    .DIV_LATENCY   (36),
+    .MULT_TYPE     (1),
+    .OPTIMIZE_GOAL (1)
+) norm_inst (
+    .i_clk     (i_clock),
+    .i_clkEn   (1'b1),
+    .i_rstN    (1'b1),
 
-divider norm_i_inst (
-    .i_clock(i_clock),
-    .i_enable(i_enable),
-    .i_reset(i_reset|reset_internal),
+    .i_xhValid (norm_xh_stb),
+    .i_xReal   (rot_i),
+    .i_xImag   (rot_q),
+    .i_hReal   (lts_i_out),
+    .i_hImag   (lts_q_out),
 
-    .i_dividend(dividend_i),
-    .i_divisor(divisor_i),
-    .i_input_strobe(div_in_stb),
+    .i_ndValid (lts_nd_stb),
+    .i_nReal   (lts_sum_i_ext),
+    .i_nImag   (lts_sum_q_ext),
+    .i_d       ({21'b0,lts_mv_avg_len}),
 
-    .o_quotient(quotient_i),
-    .o_output_strobe(div_out_stb)
-);
-
-divider norm_q_inst (
-    .i_clock(i_clock),
-    .i_enable(i_enable),
-    .i_reset(i_reset|reset_internal),
-
-    .i_dividend(dividend_q),
-    .i_divisor(divisor_q),
-    .i_input_strobe(div_in_stb),
-
-    .o_quotient(quotient_q),
-    .o_output_strobe()
+    .o_qValid  (div_out_stb),
+    .o_qReal   (quotient_i),
+    .o_qImag   (quotient_q)
 );
 
 // LVPE calculation to estimate SFO

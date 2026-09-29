@@ -21,7 +21,7 @@
 #
 # Results: <out>/results.txt (appended), one line per vector:
 #   <name> <verdict> frames=<n> ok=<n> bytes=<n> | <first SIGNAL line>
-# plus <out>/dumps/<vector>/{fcs_out,byte_out,signal_out,...}.txt for diffing
+# plus <out>/dumps/<vector>/{fcs_out,byte_out,signal_out,equalizer_out,...}.txt for diffing
 # two runs against each other (an A/B of an RTL change: same verdicts, same
 # frame counts, and byte-identical payloads on every FCS-OK frame).
 #
@@ -171,7 +171,7 @@ foreach vec $vectors {
     flush $fh
     set keep $out/dumps/[file rootname $name]
     file mkdir $keep
-    foreach t {fcs_out.txt byte_out.txt signal_out.txt phy_len.txt status_code.txt sample_file_name.txt} {
+    foreach t {fcs_out.txt byte_out.txt signal_out.txt phy_len.txt status_code.txt sample_file_name.txt equalizer_out.txt} {
         if {[file exists $simdir/$t]} { file copy -force $simdir/$t $keep/$t }
     }
     catch {close_sim -quiet}

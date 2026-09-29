@@ -70,9 +70,11 @@ namespace eval openofdm {
             error "openofdm: no RTL found under $root/verilog - wrong \$OPENOFDM?"
         }
         # complex_mult.v / stage_mult.v instantiate complex_multiplier from
-        # openCMUL (see below); it is part of the receiver, so it is returned
-        # here and no consumer has to know about the extra repository.
-        return [concat $out [cmul]]
+        # openCMUL, divider.v / equalizer.v instantiate signed_divider and
+        # complex_divider from openCDIV (see below); they are part of the
+        # receiver, so they are returned here and no consumer has to know
+        # about the extra repositories.
+        return [concat $out [cmul] [cdiv]]
     }
 
     # --- openCMUL ----------------------------------------------------------
@@ -100,6 +102,36 @@ namespace eval openofdm {
         return [list $f]
     }
 
+    # --- openCDIV ----------------------------------------------------------
+    # The open dividers that replaced the Xilinx div_gen 5.1 IP (+ its
+    # div_gen_xlslice): signed_divider for the real divisions (divider.v)
+    # and complex_divider, x / h = x * conj(h) / (h * conj(h)), for the
+    # equalizer. Found via $OPENCDIV or as a clone next to this one.
+    proc cdiv_root {} {
+        variable root
+        if {[info exists ::env(OPENCDIV)]} {
+            set c $::env(OPENCDIV)
+        } else {
+            set c [file join [file dirname $root] openCDIV]
+        }
+        if {![file isdirectory $c]} {
+            error "openCDIV not found at '$c'.\
+                   Clone https://github.com/Tobias-DG3YEV/openCDIV next to\
+                   this repository, or point \$OPENCDIV at your checkout."
+        }
+        return $c
+    }
+
+    proc cdiv {} {
+        set out {}
+        foreach m {signed_divider complex_divider} {
+            set f [file join [cdiv_root] rtl $m.v]
+            if {![file exists $f]} { error "openCDIV checkout at '[cdiv_root]' has no rtl/$m.v" }
+            lappend out $f
+        }
+        return $out
+    }
+
     # --- testbench ---------------------------------------------------------
     proc testbench {} {
         variable root
@@ -116,12 +148,16 @@ namespace eval openofdm {
     # verilog/complex_multiplier.v instead (complex_mult.v, stage_mult.v). The
     # .xci is kept on disk on purpose: tb/tb_complex_multiplier.v checks the
     # new module bit for bit against the funcsim netlist generated from it.
+    #
+    # Not in this list any more either: ip_repo/div_gen/div_gen_div_gen_0_0.xci
+    # and ip_repo/div_gen_xlslice/div_gen_xlslice_0_0.xci (Divider Generator
+    # 5.1 and the slice that kept its integer quotient), replaced by openCDIV,
+    # see proc cdiv. Kept on disk as the reference model of openCDIV's
+    # tb/tb_signed_divider.v (tools/ref_netlists.tcl writes the netlist).
     proc ip {} {
         variable root
         return [list \
             $root/ip_repo/xfft_v9/xfft_v9.xci \
-            $root/ip_repo/div_gen/div_gen_div_gen_0_0.xci \
-            $root/ip_repo/div_gen_xlslice/div_gen_xlslice_0_0.xci \
         ]
     }
 
@@ -187,6 +223,6 @@ namespace eval openofdm {
     # --- one-line provenance for build logs --------------------------------
     proc banner {} {
         variable root
-        return "openofdm $root + openViterbi [viterbi_root] + openCMUL [cmul_root]"
+        return "openofdm $root + openViterbi [viterbi_root] + openCMUL [cmul_root] + openCDIV [cdiv_root]"
     }
 }

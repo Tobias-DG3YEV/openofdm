@@ -14,8 +14,8 @@
 # With no argument the vector selected by verilog/openofdm_rx_pre_def.v is used.
 #
 # This runs through a throwaway Vivado project rather than bare xvlog/xelab,
-# because the Xilinx IP (xfft_v9, div_gen) are VHDL
-# wrappers over Xilinx libraries; letting the project generate their simulation
+# because the Xilinx IP (xfft_v9) is a VHDL
+# wrapper over Xilinx libraries; letting the project generate its simulation
 # targets is far less brittle than assembling the library list by hand.
 #
 # Output lands in <build>/sim/openofdm_sim.sim/sim_1/behav/xsim/ as ~50 .txt

@@ -5,13 +5,17 @@
 #   make sim       simulate dot11_tb against the default reference vector
 #   make sim VECTOR=simulated/ag_6M_len14_pre100_post200_openwifi.txt
 #   make project   generate a Vivado GUI project under build/
-#   make tb        openCMUL's complex_multiplier bench against the cmpy netlist
+#   make tb        openCMUL's and openCDIV's benches against the netlists of
+#                  the Xilinx cores they replace (cmpy 6.0, div_gen 5.1)
+#   make refnetlists  write those netlists (tools/ref_netlists.tcl); make tb
+#                  does it first when they are missing
 #   make regression            dot11 against every reference vector (11a+11n+sim)
 #   make regression GROUP=11a  one group (11a | 11n | sim | all) or a vector path
 #   make clean     remove build/
 #
 # Requires Vivado on $PATH (source <install>/settings64.sh) and a checkout of
-# openViterbi next to this repository, or $OPENVITERBI pointing at one.
+# openViterbi, openCMUL and openCDIV next to this repository, or
+# $OPENVITERBI / $OPENCMUL / $OPENCDIV pointing at them.
 # ---------------------------------------------------------------------------
 VIVADO ?= vivado
 VFLAGS  = -mode batch -nojournal -nolog
@@ -30,12 +34,19 @@ sim:
 project:
 	$(VIVADO) $(VFLAGS) -source tools/create_project.tcl
 
-# --- unit testbench of the complex multiplier (lives in openCMUL) ----------
+# --- unit testbenches of the multiplier and dividers (openCMUL, openCDIV) --
 OPENCMUL ?= $(abspath ../openCMUL)
+OPENCDIV ?= $(abspath ../openCDIV)
+CMPY_NETLIST   = $(abspath ip_repo/complex_multiplier/complex_multiplier_sim_netlist.v)
+DIVGEN_NETLIST = $(abspath ip_repo/div_gen/div_gen_div_gen_0_0_sim_netlist.v)
 
-.PHONY: tb
-tb:
-	$(MAKE) -C $(OPENCMUL) tb CMPY_NETLIST=$(abspath ip_repo/complex_multiplier/complex_multiplier_sim_netlist.v)
+.PHONY: tb refnetlists
+refnetlists:
+	$(VIVADO) $(VFLAGS) -source tools/ref_netlists.tcl
+
+tb: refnetlists
+	$(MAKE) -C $(OPENCMUL) tb CMPY_NETLIST=$(CMPY_NETLIST)
+	$(MAKE) -C $(OPENCDIV) tb CMPY_NETLIST=$(CMPY_NETLIST) DIVGEN_NETLIST=$(DIVGEN_NETLIST) OPENCMUL=$(OPENCMUL)
 
 # --- receiver regression (tools/run_regression.tcl) -------------------------
 # One Vivado session, one launch_simulation per vector; verdict per vector in
