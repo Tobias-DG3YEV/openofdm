@@ -4,7 +4,7 @@
 // Adapted from the upstream openwifi dot11_tb.v to the renamed (i_/o_ prefixed)
 // port interface of this fork. All logging uses dot11 output ports instead of
 // hierarchical references into renamed submodule internals.
-// The upstream original is preserved as dot11_tb.v.bak.
+// The upstream original is in this repository's history before commit 019cba8.
 //
 // Reads IQ samples from `SAMPLE_FILE (see openofdm_rx_pre_def.v) and writes
 // decode results (fcs_out.txt, byte_out.txt, conv_out.txt, ...) to the

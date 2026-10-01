@@ -7,7 +7,8 @@ based on the original openOFDM by Jinghao Shi
 following intentions:
 
  - Increase code readability (ports carry ``i_``/``o_`` prefixes; the upstream
-   originals are preserved next to each file as ``*.v.bak``)
+   originals are in this repository's history before commit ``019cba8`` and at
+   https://github.com/open-sdr/openofdm)
  - Add phase deviation output (deviation between our master clock and the
    signal received over the air)
  - Replace the proprietary, and most importantly the licence-limited
@@ -189,7 +190,6 @@ Repository layout
     verilog/            the receiver RTL; dot11.v is the top level
       lut_roms.v        inferred-BRAM replacements for the coregen ROMs
       *.mif             their contents
-      *.v.bak           the upstream originals, before the port renaming
       dot11_tb.v        the receiver testbench
       testing_inputs/   reference IQ captures (conducted/radiated/simulated)
     ip_repo/            the remaining Xilinx core (xfft_v9), .xci only
