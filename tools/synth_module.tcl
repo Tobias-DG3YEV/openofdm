@@ -11,11 +11,10 @@
 #   -generic     override a top-level parameter (repeatable; synth_design -generic)
 #   -tag         output directory suffix: build/synth/<top>_<tag>/
 #                (default build/synth/<top>/), for several parameter sets of one top
-#   -ip          force reading the Xilinx IP ([openofdm::ip], i.e. xfft_v9).
-#                Auto-detected when the source that defines <top> instantiates
-#                `xfft_v9`; for a deeper hierarchy (dot11 -> ofdm_decoder ->
-#                ... -> xfft_v9) pass -ip. (The dividers are openCDIV RTL
-#                now and need no IP.)
+#   -ip          force reading the Xilinx IP ([openofdm::ip]). The list is
+#                empty since openFFT replaced xfft_v9 (the FFT, the dividers
+#                and the multipliers are RTL now), so this only matters for a
+#                downstream project that adds an IP to the list.
 #   -files-only  read only the files listed, not verilog/*.v (useful while an
 #                unrelated file in verilog/ does not parse)
 #   file ...     extra sources, e.g. tb/phase_divlut_ref.v
@@ -40,7 +39,7 @@
 # BRAM counts RAMB18 + RAMB36 primitives. Part xc7a100tcsg324-2 like
 # synth_check.tcl; no placement or routing, so Fmax is an estimate.
 #
-# NOTE: reading the IP regenerates its products next to the .xci
+# NOTE: reading an IP regenerates its products next to the .xci
 # (reset_target all + synth_ip, like synth_check.tcl). Do not run this
 # concurrently with a simulation that reads those products.
 #
@@ -122,7 +121,8 @@ if {$topText eq ""} {
     error "no source defines module '$top' (searched [llength $sources] files)"
 }
 # Instantiation of xfft_v9 in the top's file (comments stripped, so a
-# header line that merely mentions it does not count).
+# header line that merely mentions it does not count) - kept for trees that
+# still have the IP in [openofdm::ip].
 regsub -all {/\*.*?\*/} $topText "" topCode
 regsub -all -line {//.*$} $topCode "" topCode
 set needsIp [expr {$forceIp || [regexp -line {^\s*xfft_v9\s+(#|[A-Za-z_])} $topCode]}]
@@ -130,7 +130,7 @@ set needsIp [expr {$forceIp || [regexp -line {^\s*xfft_v9\s+(#|[A-Za-z_])} $topC
 set_part $part
 foreach f $sources { read_verilog $f }
 
-# --- Xilinx IP (xfft_v9), same recipe as synth_check.tcl ----------------------
+# --- Xilinx IP (none since openFFT), same recipe as synth_check.tcl ----------
 if {$needsIp && [llength [openofdm::ip]]} {
     foreach x [openofdm::ip] {
         puts "### IP $x"

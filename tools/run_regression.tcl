@@ -11,10 +11,10 @@
 #           all  11a + 11n + sim            (default when nothing is given: 11a)
 #   <vector> is a path relative to testing_inputs/ or an absolute path.
 #
-# One throwaway project (fresh every run, so nothing stale is reused; the IP is
-# IMPORTED into it so that several sessions can run in parallel without racing
-# on ip_repo/), the IP simulation targets generated once, then one
-# launch_simulation per vector with SAMPLE_FILE passed as a -d define (a
+# One throwaway project (fresh every run, so nothing stale is reused; an IP, if
+# a tree still has one, is IMPORTED into it so that several sessions can run in
+# parallel without racing on ip_repo/ - the receiver has none since openFFT),
+# then one launch_simulation per vector with SAMPLE_FILE passed as a -d define (a
 # command-line -d beats the `define in openofdm_rx_pre_def.v). Each run is
 # cross-checked against the vector name the bench actually compiled in
 # (sample_file_name.txt) - never trust a decode without that.
@@ -109,10 +109,12 @@ add_files -norecurse -fileset sources_1 [openofdm::viterbi]
 # products into the shared ip_repo/ at the same time
 if {[llength [openofdm::ip]]} { import_files -norecurse -fileset sources_1 [openofdm::ip] }
 add_files -norecurse -fileset sim_1     [openofdm::testbench]
-upgrade_ip [get_ips]
-foreach ip [get_ips] {
-    reset_target all $ip
-    generate_target simulation $ip
+if {[llength [get_ips]]} {
+    upgrade_ip [get_ips]
+    foreach ip [get_ips] {
+        reset_target all $ip
+        generate_target simulation $ip
+    }
 }
 set_property top dot11_tb [get_filesets sim_1]
 set_property top_lib xil_defaultlib [get_filesets sim_1]

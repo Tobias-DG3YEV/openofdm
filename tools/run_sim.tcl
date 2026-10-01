@@ -13,10 +13,10 @@
 #
 # With no argument the vector selected by verilog/openofdm_rx_pre_def.v is used.
 #
-# This runs through a throwaway Vivado project rather than bare xvlog/xelab,
-# because the Xilinx IP (xfft_v9) is a VHDL
-# wrapper over Xilinx libraries; letting the project generate its simulation
-# targets is far less brittle than assembling the library list by hand.
+# This runs through a throwaway Vivado project rather than bare xvlog/xelab:
+# it was needed while the Xilinx FFT IP (a VHDL wrapper over Xilinx
+# libraries) was part of the receiver, and it still keeps the ROM/vector
+# defines and the include path in one place now that everything is RTL.
 #
 # Output lands in <build>/sim/openofdm_sim.sim/sim_1/behav/xsim/ as ~50 .txt
 # dumps plus the console trace (state transitions, receiver_rst, FCS verdict).
@@ -48,15 +48,18 @@ create_project -force openofdm_sim $out/openofdm_sim -part xc7a100tcsg324-2
 
 add_files -norecurse -fileset sources_1 [openofdm::rtl]
 add_files -norecurse -fileset sources_1 [openofdm::viterbi]
-add_files -norecurse -fileset sources_1 [openofdm::ip]
+if {[llength [openofdm::ip]]} { add_files -norecurse -fileset sources_1 [openofdm::ip] }
 add_files -norecurse -fileset sim_1     [openofdm::testbench]
 
-# Retarget and rebuild the IP for this part. Without -quiet: a silent failure
-# leaves the IP locked and elaboration dies on a missing module.
-upgrade_ip [get_ips]
-foreach ip [get_ips] {
-    reset_target all $ip
-    generate_target simulation $ip
+# Retarget and rebuild an IP for this part (none since openFFT). Without
+# -quiet: a silent failure leaves the IP locked and elaboration dies on a
+# missing module.
+if {[llength [get_ips]]} {
+    upgrade_ip [get_ips]
+    foreach ip [get_ips] {
+        reset_target all $ip
+        generate_target simulation $ip
+    }
 }
 
 set_property top dot11_tb [get_filesets sim_1]

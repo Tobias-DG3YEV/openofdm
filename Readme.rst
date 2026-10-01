@@ -30,7 +30,7 @@ http://openofdm.readthedocs.io.
 What was replaced
 -----------------
 
-Four Xilinx cores are gone from this fork:
+Five Xilinx cores are gone from this fork - the receiver is plain Verilog:
 
 **The Viterbi decoder.** ``viterbi_v7_0`` is a licence-locked evaluation core:
 it stops working after a time limit and cannot be shipped. ``ofdm_decoder.v``
@@ -107,34 +107,75 @@ openCDIV complex_divider  x * conj(h) / (h * conj(h))  39       1976  3598  ~308
 (The last two rows include the six DSP48E1 of the two complex multipliers;
 the multipliers are openCMUL in both, so the difference is the dividers.)
 
-What remains is one ordinary, licence-free core: ``xfft_v9``. Only its
-``.xci`` is versioned, under ``ip_repo/``; every build regenerates the
-products, which is also what retargets it to the part in use.
+**The FFT.** ``sync_long.v`` used the Xilinx Fast Fourier Transform 9.1
+(``xfft_v9``: 64 points, 16-bit samples, unscaled 23-bit result, pipelined
+streaming I/O, natural order). It now instantiates ``fft_axis`` from
+**openFFT**, an open FFT with the IP's AXI4-Stream ports and data layout -
+only the module name and the parameters changed in ``sync_long.v``. openFFT
+has two engines (pipelined streaming radix-2^2, one sample per clock, as
+used here; and a one-butterfly burst engine for a tenth of the logic), both
+built on openCMUL's multiplier, with the IP's unscaled / scaled arithmetic,
+inverse transform, configuration word and event flags:
+
+    https://github.com/Tobias-DG3YEV/openFFT
+
+The IP's ``.xci`` is kept under ``ip_repo/`` purely as the reference model of
+openFFT's bench; no build reads it. ``[openofdm::ip]`` is an empty list now.
+
+Measured against the IP (xc7a100t-2, 64 points, 16-bit data, unscaled,
+natural order, OOC synthesis + opt_design, Fmax from the worst slack against
+a 5 ns clock; see openFFT's README for the full table)::
+
+    core                      configuration                    LUT    FF    BRAM  DSP  Fmax est.
+    Xilinx xfft 9.1           pipelined streaming, latency 212 1403   2609  2     6    ~348 MHz
+    openFFT fft_axis          streaming, LATENCY=212 (here)    1344   800   1     8    ~225 MHz
+    openFFT fft_axis          streaming, natural latency 141   1173   635   1     8    ~225 MHz
+    openFFT fft_axis          streaming, 3-mult (OPTIMIZE_GOAL=0) 1268 943  1     6    ~225 MHz
+    openFFT fft_axis          burst (ARCH=0), latency 295      850    446   0     4    ~201 MHz
+
+On the same 14 400 result samples of openFFT's bench (random, tones, rails,
+impulses, with and without gaps and back pressure), 91 % of the 23-bit
+results are bit-identical to the IP's, 99.92 % are identical in bits 22:7 -
+the 16 bits ``sync_long.v`` keeps - and no sample differs by more than 2 LSB
+(RMS 0.25 LSB). Both cores show the same error against the double precision
+transform (max 21.8 LSB, RMS 2.33 LSB). ``sync_long.v`` instantiates the
+core with ``LATENCY = 212``, the IP's latency: ``dot11.v`` decides in its
+HT-SIG handling by ``num_ofdm_symbol`` whether to skip the HT-STS symbol, a
+timing "quick fix" that depends on when the FFT results arrive; with the
+natural 141 clocks the 65 Mbps conducted capture lost its three decodable
+frames, with 212 the receiver regression (``make regression``) decodes all
+31 reference vectors with the same verdicts, frame counts and payloads as
+with the IP.
+
+No Xilinx core is left in the receiver.
 
 
 Environment setup
 -----------------
 
 Requires AMD Vivado (developed against 2025.2; 2024.1 also elaborates) and a
-checkout of openViterbi, openCMUL and openCDIV. Clone them side by side::
+checkout of openViterbi, openCMUL, openCDIV and openFFT. Clone them side by
+side::
 
     cd ~
     git clone https://github.com/Tobias-DG3YEV/openViterbi.git
     git clone https://github.com/Tobias-DG3YEV/openCMUL.git
     git clone https://github.com/Tobias-DG3YEV/openCDIV.git
+    git clone https://github.com/Tobias-DG3YEV/openFFT.git
     git clone https://github.com/Tobias-DG3YEV/openofdm.git
 
 That layout needs no configuration - openofdm looks for ``openViterbi``,
-``openCMUL`` and ``openCDIV`` next to itself. Elsewhere, set
-``$OPENVITERBI`` / ``$OPENCMUL`` / ``$OPENCDIV`` to your checkouts. Then::
+``openCMUL``, ``openCDIV`` and ``openFFT`` next to itself. Elsewhere, set
+``$OPENVITERBI`` / ``$OPENCMUL`` / ``$OPENCDIV`` / ``$OPENFFT`` to your
+checkouts. Then::
 
     source /tools/2025.2/Vivado/settings64.sh
     cd ~/openofdm
     make check      # out-of-context synthesis of dot11 - the setup smoke test
     make sim        # simulate dot11_tb against the default reference vector
-    make tb         # openCMUL's and openCDIV's benches vs the netlists of the
-                    # cmpy / div_gen cores they replace (XSim); writes the
-                    # netlists first if missing (make refnetlists)
+    make tb         # openCMUL's, openCDIV's and openFFT's benches vs the
+                    # netlists of the cmpy / div_gen / xfft cores they replace
+                    # (XSim); writes the netlists first if missing (make refnetlists)
     make regression # dot11 against every reference vector, FCS verdict per rate
     make project    # generate a Vivado GUI project under build/
 
@@ -152,15 +193,15 @@ authoritative description of what makes up the receiver; source it and ask::
     source $ofdm/tools/openofdm_sources.tcl
     foreach f [openofdm::rtl]     { read_verilog $f }   ;# the receiver
     foreach f [openofdm::viterbi] { read_verilog $f }   ;# openViterbi
-    foreach f [openofdm::ip]      { read_ip      $f }
+    foreach f [openofdm::ip]      { read_ip      $f }   ;# empty since openFFT
     synth_design -top dot11 \
         -include_dirs   [openofdm::includes] \
         -verilog_define [openofdm::defines]
 
 ``[openofdm::rtl]`` already drops the testbench, the ``\`include``-only files
 and the AXI wrapper family (ask for the latter with ``[openofdm::rtl -axi]``),
-and it appends openCMUL's ``complex_multiplier.v`` and openCDIV's
-``signed_divider.v`` and ``complex_divider.v``.
+and it appends openCMUL's ``complex_multiplier.v``, openCDIV's
+``signed_divider.v`` and ``complex_divider.v`` and openFFT's ``rtl/*.v``.
 
 ``[openofdm::defines]`` is **not optional**. It carries ``LUT_DIR``, which
 tells ``lut_roms.v`` where its three ``.mif`` files are. Both synthesis and
@@ -188,16 +229,19 @@ Repository layout
 ::
 
     verilog/            the receiver RTL; dot11.v is the top level
+      frame_stats.v     per-frame CPE / EVM statistics of the receiver's own
+                        estimates, exported with sync_short's CFO for the
+                        RA-Sentinel IQ snapshot descriptor (fingerprinting)
       lut_roms.v        inferred-BRAM replacements for the coregen ROMs
       *.mif             their contents
       dot11_tb.v        the receiver testbench
       testing_inputs/   reference IQ captures (conducted/radiated/simulated)
-    ip_repo/            the remaining Xilinx core (xfft_v9), .xci only
-                        (+ the cmpy and div_gen .xci, reference models of the
-                        openCMUL / openCDIV benches)
+    ip_repo/            the retired Xilinx cores (cmpy, div_gen, xfft_v9) as
+                        .xci only: reference models of the openCMUL / openCDIV /
+                        openFFT benches, no build reads them
     tools/              openofdm_sources.tcl + the Vivado flows:
       run_regression.tcl  every reference vector through dot11_tb, one session
-      ref_netlists.tcl  funcsim netlists of the retired cmpy / div_gen cores
+      ref_netlists.tcl  funcsim netlists of the retired cmpy / div_gen / xfft cores
       synth_module.tcl  OOC synthesis + Fmax estimate of one module
     wip/cordic_arctan/  parked: open arctangent for phase.v (next milestone)
     scripts/            python: LUT generators, reference decoder, conv_iq_hex

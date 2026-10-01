@@ -56,6 +56,9 @@ module sync_short (
     output o_phase_in_stb,
 
     output reg signed [15:0] o_phase_offset,
+    // the same estimate before the division by 16 (the phase of the 16-sample
+    // autocorrelation), 16 times finer: for the IQ snapshot descriptor
+    output reg signed [15:0] o_phase_offset_fine,
 
     /* read-only debug tap: 64-sample moving average of |sample|^2, the
        receiver's relative baseband power (no absolute RSSI exists - the
@@ -250,6 +253,8 @@ complex_to_mag #(.DATA_WIDTH(32)) delay_prod_avg_mag_inst (
     .o_mag_stb(delay_prod_avg_mag_stb)
 );
 
+initial o_phase_offset_fine = 16'sd0;   // power-up value (no reset, see below)
+
 always @(posedge i_clock) begin
     if (i_reset) begin
         reset_delay1 <= i_reset;
@@ -272,6 +277,7 @@ always @(posedge i_clock) begin
 
         plateau_count <= 0;
         o_short_preamble_detected <= 0;
+        o_phase_offset_fine <= o_phase_offset_fine; // kept through the reset like o_phase_offset (sync_short is reset right after the STF detect; the snapshot descriptor reads it much later)
         o_phase_offset <= o_phase_offset; // do not clear it. sync short will i_reset soon after stf detected, but sync long still needs it.
     end else if (i_enable) begin
         reset_delay4 <= reset_delay3;
@@ -306,6 +312,7 @@ always @(posedge i_clock) begin
                     neg_count <= 0;
                     o_short_preamble_detected <= has_pos & has_neg;
                     if (has_pos && has_neg && i_demod_is_ongoing==0) begin // only update and lock o_phase_offset to new value when o_short_preamble_detected and not start demod yet
+                        o_phase_offset_fine <= phase_out_neg;
                         if(phase_out_neg[3] == 0)  // E.g. 131/16 = 8.1875 -> 8, -138/16 = -8.625 -> -9
                             o_phase_offset <= {{4{phase_out_neg[15]}}, phase_out_neg[15:4]};
                         else  // E.g. -131/16 = -8.1875 -> -8, 138/16 = 8.625 -> 9

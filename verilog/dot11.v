@@ -94,6 +94,15 @@ module dot11 (
     output [15:0] o_eq_phase_out,
     output o_eq_phase_out_stb,
 
+    // frame statistics for transmitter fingerprinting (frame_stats.v): live
+    // accumulators over the current frame, cleared at its long preamble
+    output signed [31:0] o_fs_cpe_sum,
+    output [31:0] o_fs_cpe_sq_sum,
+    output [31:0] o_fs_evm_sum,
+    output [15:0] o_fs_evm_cnt,
+    output [15:0] o_fs_nsym,
+    output [31:0] o_fs_peg,
+
     /////////////////////////////////////////////////////////
     // DEBUG PORTS
     /////////////////////////////////////////////////////////
@@ -111,6 +120,7 @@ module dot11 (
     // sync short
     `DEBUG_PREFIX output o_short_preamble_detected,
     `DEBUG_PREFIX  output [15:0] o_phase_offset,
+    output [15:0] o_cfo_fine,           // sync_short's estimate before /16 (frame statistics)
     output wire [31:0] o_mag_sq_avg,
 
     // sync long
@@ -429,6 +439,7 @@ sync_short sync_short_inst (
     .i_demod_is_ongoing(o_demod_is_ongoing),
     .o_short_preamble_detected(o_short_preamble_detected),
     .o_phase_offset(o_phase_offset),
+    .o_phase_offset_fine(o_cfo_fine),
     .o_mag_sq_avg(o_mag_sq_avg)
 );
 
@@ -466,6 +477,8 @@ sync_long sync_long_inst (
     #        #    #   #     #  #     #  #         #   #        #        #    #
     #######   #### #   #####   #     #  #######  ###  #######  #######  #     #
 **************************************************************************************/
+wire [15:0] eq_cpe;         // equalizer -> frame_stats: common phase error per OFDM symbol
+wire        eq_cpe_stb;
 equalizer equalizer_inst (
     .i_clock(i_clock),
     .i_reset(i_reset | equalizer_reset),
@@ -494,7 +507,35 @@ equalizer equalizer_inst (
     .o_state(o_equalizer_state),
 
     .o_csi(o_csi),
-    .o_csi_valid(o_csi_valid)
+    .o_csi_valid(o_csi_valid),
+
+    .o_cpe(eq_cpe),
+    .o_cpe_stb(eq_cpe_stb),
+    .o_peg(o_fs_peg)
+);
+
+frame_stats frame_stats_inst (
+    .i_clock(i_clock),
+    .i_reset(i_reset),
+    .i_enable(i_enable),
+
+    .i_frame_start(o_long_preamble_detected),
+
+    .i_cpe(eq_cpe),
+    .i_cpe_stb(eq_cpe_stb),
+
+    // the same delayed stream the decoder is fed with, gated by its data state
+    .i_eq_out({eq_out_i_delayed, eq_out_q_delayed}),
+    .i_eq_out_stb(eq_out_stb_delayed),
+    .i_demod(o_demod_is_ongoing),
+    .i_data_phase(o_state == S_DECODE_DATA),
+    .i_pkt_rate(o_pkt_rate),
+
+    .o_cpe_sum(o_fs_cpe_sum),
+    .o_cpe_sq_sum(o_fs_cpe_sq_sum),
+    .o_evm_sum(o_fs_evm_sum),
+    .o_evm_cnt(o_fs_evm_cnt),
+    .o_nsym(o_fs_nsym)
 );
 
 

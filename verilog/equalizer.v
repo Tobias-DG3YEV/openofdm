@@ -63,7 +63,14 @@ module equalizer
 
     // for side channel
     output [31:0] o_csi,
-    output o_csi_valid
+    output o_csi_valid,
+
+    // frame statistics (frame_stats.v): the common phase error of the symbol
+    // just estimated (valid with o_cpe_stb, one clock after it is taken) and
+    // the running phase error gradient
+    output [15:0] o_cpe,
+    output o_cpe_stb,
+    output [31:0] o_peg
 );
 
 // mask[0] is DC, mask[1:26] -> 1,..., 26
@@ -261,6 +268,12 @@ wire lts_div_out_stb = div_out_stb;
 // for side channel
 reg sample_in_strobe_dly;
 assign o_csi = {lts_i_out, lts_q_out};
+
+reg cpe_taken;
+always @(posedge i_clock) cpe_taken <= (o_state == S_CPE_ESTIMATE) && i_phase_out_stb && i_enable && !i_reset;
+assign o_cpe     = cpe;
+assign o_cpe_stb = cpe_taken;
+assign o_peg     = prev_peg;
 assign o_csi_valid = ( (num_ofdm_sym == 1 || (i_pkt_ht == 1 && num_ofdm_sym == 5)) && o_state == S_CPE_ESTIMATE && sample_in_strobe_dly == 1 && i_enable && (~i_reset) );
 
 always @(posedge i_clock) begin

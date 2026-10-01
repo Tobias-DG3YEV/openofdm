@@ -71,10 +71,11 @@ namespace eval openofdm {
         }
         # complex_mult.v / stage_mult.v instantiate complex_multiplier from
         # openCMUL, divider.v / equalizer.v instantiate signed_divider and
-        # complex_divider from openCDIV (see below); they are part of the
-        # receiver, so they are returned here and no consumer has to know
-        # about the extra repositories.
-        return [concat $out [cmul] [cdiv]]
+        # complex_divider from openCDIV, sync_long.v instantiates fft_axis
+        # from openFFT (see below); they are part of the receiver, so they
+        # are returned here and no consumer has to know about the extra
+        # repositories.
+        return [concat $out [cmul] [cdiv] [fft]]
     }
 
     # --- openCMUL ----------------------------------------------------------
@@ -132,6 +133,36 @@ namespace eval openofdm {
         return $out
     }
 
+    # --- openFFT -----------------------------------------------------------
+    # The open FFT that replaced the Xilinx xfft 9.1 IP: fft_axis has the
+    # IP's AXI4-Stream ports and is instantiated by sync_long.v (64 points,
+    # 16 bit, unscaled, pipelined streaming). Found via $OPENFFT or as a
+    # clone next to this one. All of rtl/*.v are needed (the engine modules
+    # behind fft_axis); fft_sdf_twiddle.v and fft_burst.v instantiate
+    # openCMUL's complex_multiplier, which [cmul] already returns.
+    proc fft_root {} {
+        variable root
+        if {[info exists ::env(OPENFFT)]} {
+            set c $::env(OPENFFT)
+        } else {
+            set c [file join [file dirname $root] openFFT]
+        }
+        if {![file isdirectory $c]} {
+            error "openFFT not found at '$c'.\
+                   Clone https://github.com/Tobias-DG3YEV/openFFT next to\
+                   this repository, or point \$OPENFFT at your checkout."
+        }
+        return $c
+    }
+
+    proc fft {} {
+        set out [lsort [glob -nocomplain [file join [fft_root] rtl *.v]]]
+        if {[lsearch -glob $out *fft_axis.v] < 0} {
+            error "openFFT checkout at '[fft_root]' has no rtl/fft_axis.v"
+        }
+        return $out
+    }
+
     # --- testbench ---------------------------------------------------------
     proc testbench {} {
         variable root
@@ -139,8 +170,16 @@ namespace eval openofdm {
     }
 
     # --- Xilinx IP ---------------------------------------------------------
-    # Only the .xci is versioned; every build regenerates the products, which
-    # is also what retargets them from whatever part they were last saved for.
+    # EMPTY since openFFT replaced the last core: the receiver is plain RTL
+    # (openofdm + openViterbi + openCMUL + openCDIV + openFFT) and needs no
+    # IP catalog, no licence and no vendor. The proc stays so that consumers
+    # keep working unchanged (they iterate over an empty list).
+    #
+    # Not in this list any more: ip_repo/xfft_v9/xfft_v9.xci (Fast Fourier
+    # Transform 9.1, 64 points, pipelined streaming, unscaled), replaced by
+    # openFFT's fft_axis, see proc fft. The .xci is kept on disk as the
+    # reference model of openFFT's tb/tb_fft_axis.v (tools/ref_netlists.tcl
+    # writes the netlist).
     #
     # Not in this list any more: ip_repo/complex_multiplier/complex_multiplier.xci
     # (replaced by openCMUL, see proc cmul)
@@ -155,10 +194,7 @@ namespace eval openofdm {
     # see proc cdiv. Kept on disk as the reference model of openCDIV's
     # tb/tb_signed_divider.v (tools/ref_netlists.tcl writes the netlist).
     proc ip {} {
-        variable root
-        return [list \
-            $root/ip_repo/xfft_v9/xfft_v9.xci \
-        ]
+        return [list]
     }
 
     # --- include path ------------------------------------------------------
@@ -223,6 +259,6 @@ namespace eval openofdm {
     # --- one-line provenance for build logs --------------------------------
     proc banner {} {
         variable root
-        return "openofdm $root + openViterbi [viterbi_root] + openCMUL [cmul_root] + openCDIV [cdiv_root]"
+        return "openofdm $root + openViterbi [viterbi_root] + openCMUL [cmul_root] + openCDIV [cdiv_root] + openFFT [fft_root]"
     }
 }

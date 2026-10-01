@@ -237,7 +237,11 @@ delayT #(.DATA_WIDTH(1), .DELAY(10)) fft_delay_inst (
     .o_data_out(fft_din_data_tlast_delayed)
 );
 
-///the fft7_1 isntance is commented out, as it is upgraded to fft9 version
+// The 64-point FFT. Until openFFT replaced it this was the AMD/Xilinx xfft
+// 9.1 core (pipelined streaming I/O, 16-bit data, unscaled, natural order,
+// non-realtime throttle, 23-bit result); fft_axis has the same ports and the
+// same data layout, so only the module name and the parameters changed.
+// The xfft 7.1 instance of the original openofdm is kept below for reference.
 /*xfft_v7_1 dft_inst (
     .clk(i_clock),
     .fwd_inv(1),
@@ -255,7 +259,23 @@ delayT #(.DATA_WIDTH(1), .DELAY(10)) fft_delay_inst (
 );*/
 
 
-xfft_v9 dft_inst (
+fft_axis #(
+  .LOG2_N(6),            // 64 points
+  .DATA_WIDTH(16),
+  .TWIDDLE_WIDTH(16),
+  .ARCH(1),              // pipelined streaming: one sample per clock, like the IP
+  .SCALING(0),           // unscaled, 16 + 6 + 1 = 23 bit result
+  .ROUND_MODE(0),        // truncation, like the IP
+  .OUTPUT_ORDER(1),      // natural order
+  // The IP's latency (212 clocks first sample in -> first result out). The
+  // natural latency of openFFT's streaming engine is 141, but dot11.v's
+  // HT-SIG handling (the num_ofdm_symbol == 5 "quick fix" that skips HT-STS)
+  // depends on WHEN the FFT results arrive relative to sync_long's symbol
+  // counter: with 141 clocks the 65 Mbps conducted capture of the regression
+  // lost its 3 decodable frames, with 212 every vector decodes exactly as
+  // with the IP. Keep this in step with that logic, not with the IP.
+  .LATENCY(212)
+) dft_inst (
   .aclk(i_clock),       // input wire aclk
   .aresetn(fft_i_resetn),                                               
   .s_axis_config_tdata({7'b0, 1'b1}),                          // input wire [7 : 0] s_axis_config_tdata, use LSB to indicate it is forward transform, the rest should be ignored
